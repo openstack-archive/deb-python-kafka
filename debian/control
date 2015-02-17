@@ -12,8 +12,10 @@ Build-Depends: debhelper (>= 9),
                python3-setuptools
 Build-Depends-Indep: python-nose,
                      python-nose-timer,
+                     python-six,
                      python3-nose,
-                     python3-nose-timer
+                     python3-nose-timer,
+                     python3-six
 Standards-Version: 3.9.6
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/python-kafka.git
 Vcs-Git: git://anonscm.debian.org/openstack/python-kafka.git
@@ -22,7 +24,7 @@ Homepage: https://github.com/mumrah/kafka-python
 Package: python-kafka
 Architecture: all
 Pre-Depends: dpkg (>= 1.15.6~)
-Depends: ${misc:Depends}, ${python:Depends}
+Depends: python-six, ${misc:Depends}, ${python:Depends}
 Suggests: python-kafka-doc
 Description: Pure Python client for Apache Kafka - Python 2.x
  This module provides low-level protocol support for Apache Kafka as well as
@@ -36,7 +38,7 @@ Package: python3-kafka
 Architecture: all
 Pre-Depends: dpkg (>= 1.15.6~)
 Depends: ${misc:Depends}, ${python3:Depends}
-Suggests: python-kafka-doc
+Suggests: python-kafka-doc, python3-six
 Description: Pure Python client for Apache Kafka - Python 3.x
  This module provides low-level protocol support for Apache Kafka as well as
  high-level consumer and producer classes. Request batching is supported by the

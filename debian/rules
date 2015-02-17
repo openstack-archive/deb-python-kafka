@@ -32,7 +32,7 @@ endif
 
 override_dh_clean:
 	dh_clean -O--buildsystem=python_distutils
-	rm -rf build kafka-python
+	rm -rf build kafka-python .coverage
 
 override_dh_sphinxdoc:
 	sphinx-build -b html docs debian/python-kafka-doc/usr/share/doc/python-kafka-doc/html
