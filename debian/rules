@@ -22,9 +22,12 @@ override_dh_install:
 
 override_dh_auto_test:
 ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
+	mkdir -p kafka_python.egg-info
+	cp debian/PKG-INFO kafka_python.egg-info
 	ln -s kafka kafka-python
-	PYTHON=python2.7 PYTHONPATH=. nosetests --with-timer --timer-top-n 10 --with-coverage --cover-erase --cover-package kafka
-	PYTHON=python3 PYTHONPATH=. nosetests3
+	PYTHON=python2.7 PYTHONPATH=. nosetests -v --with-timer --timer-top-n 5
+	PYTHON=python3 PYTHONPATH=. nosetests3 -v --with-timer --timer-top-n 5
+	rm -rf kafka_python.egg-info
 #	set -e ; for pyvers in $(PYTHONS) $(PYTHON3S); do \
 #		PYTHON=python$$pyvers setup.py test ; \
 #	done
@@ -32,7 +35,7 @@ endif
 
 override_dh_clean:
 	dh_clean -O--buildsystem=python_distutils
-	rm -rf build kafka-python .coverage
+	rm -rf build kafka-python .coverage kafka_python.egg-info
 
 override_dh_sphinxdoc:
 	sphinx-build -b html docs debian/python-kafka-doc/usr/share/doc/python-kafka-doc/html
