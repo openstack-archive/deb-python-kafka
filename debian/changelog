@@ -1,6 +1,7 @@
 python-kafka (0.9.3-2) unstable; urgency=medium
 
   * Added missing python-mock build-deps.
+  * Added PYTHONPATH=. when building sphinx doc.
 
  -- Thomas Goirand <zigo@debian.org>  Tue, 17 Feb 2015 15:22:08 +0000
 

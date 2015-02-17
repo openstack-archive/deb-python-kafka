@@ -38,7 +38,7 @@ override_dh_clean:
 	rm -rf build kafka-python .coverage kafka_python.egg-info
 
 override_dh_sphinxdoc:
-	sphinx-build -b html docs debian/python-kafka-doc/usr/share/doc/python-kafka-doc/html
+	PYTHONPATH=. sphinx-build -b html docs debian/python-kafka-doc/usr/share/doc/python-kafka-doc/html
 	dh_sphinxdoc -O--buildsystem=python_distutils
 
 # Commands not to run
