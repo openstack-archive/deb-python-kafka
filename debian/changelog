@@ -1,0 +1,5 @@
+python-kafka (0.9.3-1) unstable; urgency=medium
+
+  * Initial release. (Closes: #778619)
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 17 Feb 2015 15:35:34 +0100
