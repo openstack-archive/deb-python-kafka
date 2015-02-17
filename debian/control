@@ -3,7 +3,17 @@ Section: python
 Priority: optional
 Maintainer: PKG OpenStack <openstack-devel@lists.alioth.debian.org>
 Uploaders: Thomas Goirand <zigo@debian.org>
-Build-Depends: debhelper (>= 9), dh-python, python-setuptools, python-all (>= 2.6.6-3~), python3-setuptools, python3-all
+Build-Depends: debhelper (>= 9),
+               dh-python,
+               python-all (>= 2.6.6-3~),
+               python-setuptools,
+               python-sphinx,
+               python3-all,
+               python3-setuptools
+Build-Depends-Indep: python-nose,
+                     python-nose-timer,
+                     python3-nose,
+                     python3-nose-timer
 Standards-Version: 3.9.6
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/python-kafka.git
 Vcs-Git: git://anonscm.debian.org/openstack/python-kafka.git
@@ -12,7 +22,7 @@ Homepage: https://github.com/mumrah/kafka-python
 Package: python-kafka
 Architecture: all
 Pre-Depends: dpkg (>= 1.15.6~)
-Depends: ${python:Depends}, ${misc:Depends}
+Depends: ${misc:Depends}, ${python:Depends}
 Suggests: python-kafka-doc
 Description: Pure Python client for Apache Kafka - Python 2.x
  This module provides low-level protocol support for Apache Kafka as well as
@@ -25,7 +35,7 @@ Description: Pure Python client for Apache Kafka - Python 2.x
 Package: python3-kafka
 Architecture: all
 Pre-Depends: dpkg (>= 1.15.6~)
-Depends: ${python3:Depends}, ${misc:Depends}
+Depends: ${misc:Depends}, ${python3:Depends}
 Suggests: python-kafka-doc
 Description: Pure Python client for Apache Kafka - Python 3.x
  This module provides low-level protocol support for Apache Kafka as well as
@@ -47,4 +57,3 @@ Description: Pure Python client for Apache Kafka - doc
  is also supported for message sets.
  .
  This package contains the documentation.
-
