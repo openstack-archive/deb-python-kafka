@@ -1,0 +1,17 @@
+Description: Do not use the sphinxcontrib.napoleon sphinx theme
+ This theme isn't available in Debian (yet), and I don't have the time to
+ package it, so for now, I'm just disabling the use of it.
+Author: Thomas Goirand <zigo@debian.org>
+Forwarded: no
+Last-Update: 2015-02-17
+
+--- python-kafka-0.9.3.orig/docs/conf.py
++++ python-kafka-0.9.3/docs/conf.py
+@@ -31,7 +31,6 @@ import os
+ extensions = [
+     'sphinx.ext.autodoc',
+     'sphinx.ext.viewcode',
+-    'sphinxcontrib.napoleon',
+ ]
+ 
+ # Add any paths that contain templates here, relative to this directory.
