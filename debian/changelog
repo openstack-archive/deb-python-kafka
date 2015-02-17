@@ -1,3 +1,9 @@
+python-kafka (0.9.3-2) unstable; urgency=medium
+
+  * Added missing python-mock build-deps.
+
+ -- Thomas Goirand <zigo@debian.org>  Tue, 17 Feb 2015 15:22:08 +0000
+
 python-kafka (0.9.3-1) unstable; urgency=medium
 
   * Initial release. (Closes: #778619)

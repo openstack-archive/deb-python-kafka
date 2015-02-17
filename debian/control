@@ -10,9 +10,11 @@ Build-Depends: debhelper (>= 9),
                python-sphinx,
                python3-all,
                python3-setuptools
-Build-Depends-Indep: python-nose,
+Build-Depends-Indep: python-mock,
+                     python-nose,
                      python-nose-timer,
                      python-six,
+                     python3-mock,
                      python3-nose,
                      python3-nose-timer,
                      python3-six
