@@ -1,3 +1,9 @@
+python-kafka (0.9.3-3) UNRELEASED; urgency=medium
+
+  * Fixed VCS URLs (https).
+
+ -- Ondřej Nový <novy@ondrej.org>  Sun, 28 Feb 2016 15:40:27 +0100
+
 python-kafka (0.9.3-2) unstable; urgency=medium
 
   * Added missing python-mock build-deps.

@@ -19,8 +19,8 @@ Build-Depends-Indep: python-mock,
                      python3-nose-timer,
                      python3-six
 Standards-Version: 3.9.6
-Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/python-kafka.git
-Vcs-Git: git://anonscm.debian.org/openstack/python-kafka.git
+Vcs-Browser: https://anonscm.debian.org/cgit/openstack/python-kafka.git/
+Vcs-Git: https://anonscm.debian.org/git/openstack/python-kafka.git
 Homepage: https://github.com/mumrah/kafka-python
 
 Package: python-kafka
