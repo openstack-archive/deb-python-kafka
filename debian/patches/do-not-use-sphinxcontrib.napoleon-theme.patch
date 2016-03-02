@@ -5,11 +5,13 @@ Author: Thomas Goirand <zigo@debian.org>
 Forwarded: no
 Last-Update: 2015-02-17
 
---- python-kafka-0.9.3.orig/docs/conf.py
-+++ python-kafka-0.9.3/docs/conf.py
-@@ -31,7 +31,6 @@ import os
- extensions = [
+Index: python-kafka/docs/conf.py
+===================================================================
+--- python-kafka.orig/docs/conf.py
++++ python-kafka/docs/conf.py
+@@ -32,7 +32,6 @@ extensions = [
      'sphinx.ext.autodoc',
+     'sphinx.ext.intersphinx',
      'sphinx.ext.viewcode',
 -    'sphinxcontrib.napoleon',
  ]
