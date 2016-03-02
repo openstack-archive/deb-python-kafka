@@ -1,8 +1,12 @@
-python-kafka (0.9.3-3) UNRELEASED; urgency=medium
+python-kafka (0.9.5-1) unstable; urgency=medium
 
+  [ Ondřej Nový ]
   * Fixed VCS URLs (https).
 
- -- Ondřej Nový <novy@ondrej.org>  Sun, 28 Feb 2016 15:40:27 +0100
+  [ Thomas Goirand ]
+  * New upstream release.
+
+ -- Thomas Goirand <zigo@debian.org>  Wed, 02 Mar 2016 13:50:34 +0000
 
 python-kafka (0.9.3-2) unstable; urgency=medium
 
