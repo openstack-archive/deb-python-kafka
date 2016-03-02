@@ -1,5 +1,6 @@
 from __future__ import absolute_import
 
+import atexit
 import logging
 import numbers
 from threading import Lock
@@ -7,12 +8,13 @@ from threading import Lock
 import kafka.common
 from kafka.common import (
     OffsetRequest, OffsetCommitRequest, OffsetFetchRequest,
-    UnknownTopicOrPartitionError
+    UnknownTopicOrPartitionError, check_error, KafkaError
 )
 
-from kafka.util import ReentrantTimer
+from kafka.util import kafka_bytestring, ReentrantTimer
 
-log = logging.getLogger("kafka")
+
+log = logging.getLogger('kafka.consumer')
 
 AUTO_COMMIT_MSG_COUNT = 100
 AUTO_COMMIT_INTERVAL = 5000
@@ -25,7 +27,9 @@ MAX_FETCH_BUFFER_SIZE_BYTES = FETCH_BUFFER_SIZE_BYTES * 8
 
 ITER_TIMEOUT_SECONDS = 60
 NO_MESSAGES_WAIT_TIME_SECONDS = 0.1
+FULL_QUEUE_WAIT_TIME_SECONDS = 0.1
 
+MAX_BACKOFF_SECONDS = 60
 
 class Consumer(object):
     """
@@ -43,12 +47,12 @@ class Consumer(object):
                  auto_commit_every_t=AUTO_COMMIT_INTERVAL):
 
         self.client = client
-        self.topic = topic
-        self.group = group
+        self.topic = kafka_bytestring(topic)
+        self.group = None if group is None else kafka_bytestring(group)
         self.client.load_metadata_for_topics(topic)
         self.offsets = {}
 
-        if not partitions:
+        if partitions is None:
             partitions = self.client.get_partition_ids_for_topic(topic)
         else:
             assert all(isinstance(x, numbers.Integral) for x in partitions)
@@ -67,37 +71,65 @@ class Consumer(object):
                                                self.commit)
             self.commit_timer.start()
 
-        if auto_commit:
+        # Set initial offsets
+        if self.group is not None:
             self.fetch_last_known_offsets(partitions)
         else:
             for partition in partitions:
                 self.offsets[partition] = 0
 
+        # Register a cleanup handler
+        def cleanup(obj):
+            obj.stop()
+        self._cleanup_func = cleanup
+        atexit.register(cleanup, self)
+
+        self.partition_info = False     # Do not return partition info in msgs
+
+    def provide_partition_info(self):
+        """
+        Indicates that partition info must be returned by the consumer
+        """
+        self.partition_info = True
+
     def fetch_last_known_offsets(self, partitions=None):
-        if not partitions:
+        if self.group is None:
+            raise ValueError('KafkaClient.group must not be None')
+
+        if partitions is None:
             partitions = self.client.get_partition_ids_for_topic(self.topic)
 
-        def get_or_init_offset(resp):
-            try:
-                kafka.common.check_error(resp)
-                return resp.offset
-            except UnknownTopicOrPartitionError:
-                return 0
+        responses = self.client.send_offset_fetch_request(
+            self.group,
+            [OffsetFetchRequest(self.topic, p) for p in partitions],
+            fail_on_error=False
+        )
 
-        for partition in partitions:
-            req = OffsetFetchRequest(self.topic, partition)
-            (resp,) = self.client.send_offset_fetch_request(self.group, [req],
-                          fail_on_error=False)
-            self.offsets[partition] = get_or_init_offset(resp)
-        self.fetch_offsets = self.offsets.copy()
+        for resp in responses:
+            try:
+                check_error(resp)
+            # API spec says server wont set an error here
+            # but 0.8.1.1 does actually...
+            except UnknownTopicOrPartitionError:
+                pass
+
+            # -1 offset signals no commit is currently stored
+            if resp.offset == -1:
+                self.offsets[resp.partition] = 0
+
+            # Otherwise we committed the stored offset
+            # and need to fetch the next one
+            else:
+                self.offsets[resp.partition] = resp.offset
 
     def commit(self, partitions=None):
-        """
-        Commit offsets for this consumer
+        """Commit stored offsets to Kafka via OffsetCommitRequest (v0)
 
         Keyword Arguments:
             partitions (list): list of partitions to commit, default is to commit
                 all of them
+
+        Returns: True on success, False on failure
         """
 
         # short circuit if nothing happened. This check is kept outside
@@ -112,23 +144,28 @@ class Consumer(object):
                 return
 
             reqs = []
-            if not partitions:  # commit all partitions
-                partitions = self.offsets.keys()
+            if partitions is None:  # commit all partitions
+                partitions = list(self.offsets.keys())
 
+            log.debug('Committing new offsets for %s, partitions %s',
+                     self.topic, partitions)
             for partition in partitions:
                 offset = self.offsets[partition]
-                log.debug("Commit offset %d in SimpleConsumer: "
-                          "group=%s, topic=%s, partition=%s" %
-                          (offset, self.group, self.topic, partition))
+                log.debug('Commit offset %d in SimpleConsumer: '
+                          'group=%s, topic=%s, partition=%s',
+                          offset, self.group, self.topic, partition)
 
                 reqs.append(OffsetCommitRequest(self.topic, partition,
                                                 offset, None))
 
-            resps = self.client.send_offset_commit_request(self.group, reqs)
-            for resp in resps:
-                kafka.common.check_error(resp)
-
-            self.count_since_commit = 0
+            try:
+                self.client.send_offset_commit_request(self.group, reqs)
+            except KafkaError as e:
+                log.error('%s saving offsets: %s', e.__class__.__name__, e)
+                return False
+            else:
+                self.count_since_commit = 0
+                return True
 
     def _auto_commit(self):
         """
@@ -147,6 +184,25 @@ class Consumer(object):
             self.commit_timer.stop()
             self.commit()
 
+        if hasattr(self, '_cleanup_func'):
+            # Remove cleanup handler now that we've stopped
+
+            # py3 supports unregistering
+            if hasattr(atexit, 'unregister'):
+                atexit.unregister(self._cleanup_func) # pylint: disable=no-member
+
+            # py2 requires removing from private attribute...
+            else:
+
+                # ValueError on list.remove() if the exithandler no longer
+                # exists is fine here
+                try:
+                    atexit._exithandlers.remove((self._cleanup_func, (self,), {}))
+                except ValueError:
+                    pass
+
+            del self._cleanup_func
+
     def pending(self, partitions=None):
         """
         Gets the pending message count
@@ -154,7 +210,7 @@ class Consumer(object):
         Keyword Arguments:
             partitions (list): list of partitions to check for, default is to check all
         """
-        if not partitions:
+        if partitions is None:
             partitions = self.offsets.keys()
 
         total = 0

@@ -11,9 +11,13 @@ __all__ = [
 
 ]
 
+
+log = logging.getLogger(__name__)
+
+
 class ExternalService(object):
     def __init__(self, host, port):
-        logging.info("Using already running service at %s:%d", host, port)
+        log.info("Using already running service at %s:%d", host, port)
         self.host = host
         self.port = port
 
@@ -36,19 +40,38 @@ class SpawnedService(threading.Thread):
         self.captured_stderr = []
 
         self.should_die = threading.Event()
+        self.child = None
+        self.alive = False
 
     def run(self):
         self.run_with_handles()
 
-    def run_with_handles(self):
+    def _spawn(self):
+        if self.alive: return
+        if self.child and self.child.poll() is None: return
+
         self.child = subprocess.Popen(
             self.args,
             env=self.env,
             bufsize=1,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE)
-        alive = True
+        self.alive = True
 
+    def _despawn(self):
+        if self.child.poll() is None:
+            self.child.terminate()
+        self.alive = False
+        for _ in range(50):
+            if self.child.poll() is not None:
+                self.child = None
+                break
+            time.sleep(0.1)
+        else:
+            self.child.kill()
+
+    def run_with_handles(self):
+        self._spawn()
         while True:
             (rds, _, _) = select.select([self.child.stdout, self.child.stderr], [], [], 1)
 
@@ -60,26 +83,22 @@ class SpawnedService(threading.Thread):
                 line = self.child.stderr.readline()
                 self.captured_stderr.append(line.decode('utf-8'))
 
-            if self.should_die.is_set():
-                self.child.terminate()
-                alive = False
+            if self.child.poll() is not None:
+                self.dump_logs()
+                self._spawn()
 
-            poll_results = self.child.poll()
-            if poll_results is not None:
-                if not alive:
-                    break
-                else:
-                    self.dump_logs()
-                    raise RuntimeError("Subprocess has died. Aborting. (args=%s)" % ' '.join(str(x) for x in self.args))
+            if self.should_die.is_set():
+                self._despawn()
+                break
 
     def dump_logs(self):
-        logging.critical('stderr')
+        log.critical('stderr')
         for line in self.captured_stderr:
-            logging.critical(line.rstrip())
+            log.critical(line.rstrip())
 
-        logging.critical('stdout')
+        log.critical('stdout')
         for line in self.captured_stdout:
-            logging.critical(line.rstrip())
+            log.critical(line.rstrip())
 
     def wait_for(self, pattern, timeout=30):
         t1 = time.time()
@@ -89,17 +108,18 @@ class SpawnedService(threading.Thread):
                 try:
                     self.child.kill()
                 except:
-                    logging.exception("Received exception when killing child process")
+                    log.exception("Received exception when killing child process")
                 self.dump_logs()
 
-                raise RuntimeError("Waiting for %r timed out after %d seconds" % (pattern, timeout))
+                log.error("Waiting for %r timed out after %d seconds", pattern, timeout)
+                return False
 
             if re.search(pattern, '\n'.join(self.captured_stdout), re.IGNORECASE) is not None:
-                logging.info("Found pattern %r in %d seconds via stdout", pattern, (t2 - t1))
-                return
+                log.info("Found pattern %r in %d seconds via stdout", pattern, (t2 - t1))
+                return True
             if re.search(pattern, '\n'.join(self.captured_stderr), re.IGNORECASE) is not None:
-                logging.info("Found pattern %r in %d seconds via stderr", pattern, (t2 - t1))
-                return
+                log.info("Found pattern %r in %d seconds via stderr", pattern, (t2 - t1))
+                return True
             time.sleep(0.1)
 
     def start(self):

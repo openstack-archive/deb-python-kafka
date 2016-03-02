@@ -3,9 +3,12 @@ import os
 
 from six.moves import xrange
 
-from kafka import SimpleConsumer, MultiProcessConsumer, KafkaConsumer, create_message
+from kafka import (
+    KafkaConsumer, MultiProcessConsumer, SimpleConsumer, create_message
+)
 from kafka.common import (
-    ProduceRequest, ConsumerFetchSizeTooSmall, ConsumerTimeout
+    ProduceRequest, ConsumerFetchSizeTooSmall, ConsumerTimeout,
+    OffsetOutOfRangeError
 )
 from kafka.consumer.base import MAX_FETCH_BUFFER_SIZE_BYTES
 
@@ -13,6 +16,7 @@ from test.fixtures import ZookeeperFixture, KafkaFixture
 from test.testutil import (
     KafkaIntegrationTestCase, kafka_versions, random_string, Timer
 )
+
 
 class TestConsumerIntegration(KafkaIntegrationTestCase):
     @classmethod
@@ -37,7 +41,7 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
 
     def send_messages(self, partition, messages):
         messages = [ create_message(self.msg(str(msg))) for msg in messages ]
-        produce = ProduceRequest(self.topic, partition, messages = messages)
+        produce = ProduceRequest(self.bytes_topic, partition, messages = messages)
         resp, = self.client.send_produce_request([produce])
         self.assertEqual(resp.error, 0)
 
@@ -53,6 +57,7 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
     def consumer(self, **kwargs):
         if os.environ['KAFKA_VERSION'] == "0.8.0":
             # Kafka 0.8.0 simply doesn't support offset requests, so hard code it being off
+            kwargs['group'] = None
             kwargs['auto_commit'] = False
         else:
             kwargs.setdefault('auto_commit', True)
@@ -61,7 +66,7 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
         group = kwargs.pop('group', self.id().encode('utf-8'))
         topic = kwargs.pop('topic', self.topic)
 
-        if consumer_class == SimpleConsumer:
+        if consumer_class in [SimpleConsumer, MultiProcessConsumer]:
             kwargs.setdefault('iter_timeout', 0)
 
         return consumer_class(self.client, group, topic, **kwargs)
@@ -69,7 +74,7 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
     def kafka_consumer(self, **configs):
         brokers = '%s:%d' % (self.server.host, self.server.port)
         consumer = KafkaConsumer(self.topic,
-                                 metadata_broker_list=brokers,
+                                 bootstrap_servers=brokers,
                                  **configs)
         return consumer
 
@@ -84,6 +89,65 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
         self.assert_message_count([ message for message in consumer ], 200)
 
         consumer.stop()
+
+    @kafka_versions('all')
+    def test_simple_consumer_smallest_offset_reset(self):
+        self.send_messages(0, range(0, 100))
+        self.send_messages(1, range(100, 200))
+
+        consumer = self.consumer(auto_offset_reset='smallest')
+        # Move fetch offset ahead of 300 message (out of range)
+        consumer.seek(300, 2)
+        # Since auto_offset_reset is set to smallest we should read all 200
+        # messages from beginning.
+        self.assert_message_count([message for message in consumer], 200)
+
+    @kafka_versions('all')
+    def test_simple_consumer_largest_offset_reset(self):
+        self.send_messages(0, range(0, 100))
+        self.send_messages(1, range(100, 200))
+
+        # Default largest
+        consumer = self.consumer()
+        # Move fetch offset ahead of 300 message (out of range)
+        consumer.seek(300, 2)
+        # Since auto_offset_reset is set to largest we should not read any
+        # messages.
+        self.assert_message_count([message for message in consumer], 0)
+        # Send 200 new messages to the queue
+        self.send_messages(0, range(200, 300))
+        self.send_messages(1, range(300, 400))
+        # Since the offset is set to largest we should read all the new messages.
+        self.assert_message_count([message for message in consumer], 200)
+
+    @kafka_versions('all')
+    def test_simple_consumer_no_reset(self):
+        self.send_messages(0, range(0, 100))
+        self.send_messages(1, range(100, 200))
+
+        # Default largest
+        consumer = self.consumer(auto_offset_reset=None)
+        # Move fetch offset ahead of 300 message (out of range)
+        consumer.seek(300, 2)
+        with self.assertRaises(OffsetOutOfRangeError):
+            consumer.get_message()
+
+    @kafka_versions("0.8.1", "0.8.1.1", "0.8.2.1")
+    def test_simple_consumer_load_initial_offsets(self):
+        self.send_messages(0, range(0, 100))
+        self.send_messages(1, range(100, 200))
+
+        # Create 1st consumer and change offsets
+        consumer = self.consumer()
+        self.assertEqual(consumer.offsets, {0: 0, 1: 0})
+        consumer.offsets.update({0:51, 1:101})
+        # Update counter after manual offsets update
+        consumer.count_since_commit += 1
+        consumer.commit()
+
+        # Create 2nd consumer and check initial offsets
+        consumer = self.consumer(auto_commit=False)
+        self.assertEqual(consumer.offsets, {0: 51, 1: 101})
 
     @kafka_versions("all")
     def test_simple_consumer__seek(self):
@@ -100,17 +164,31 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
         consumer.seek(-13, 2)
         self.assert_message_count([ message for message in consumer ], 13)
 
+        # Set absolute offset
+        consumer.seek(100)
+        self.assert_message_count([ message for message in consumer ], 0)
+        consumer.seek(100, partition=0)
+        self.assert_message_count([ message for message in consumer ], 0)
+        consumer.seek(101, partition=1)
+        self.assert_message_count([ message for message in consumer ], 0)
+        consumer.seek(90, partition=0)
+        self.assert_message_count([ message for message in consumer ], 10)
+        consumer.seek(20, partition=1)
+        self.assert_message_count([ message for message in consumer ], 80)
+        consumer.seek(0, partition=1)
+        self.assert_message_count([ message for message in consumer ], 100)
+
         consumer.stop()
 
     @kafka_versions("all")
     def test_simple_consumer_blocking(self):
         consumer = self.consumer()
 
-        # Ask for 5 messages, nothing in queue, block 5 seconds
+        # Ask for 5 messages, nothing in queue, block 1 second
         with Timer() as t:
-            messages = consumer.get_messages(block=True, timeout=5)
+            messages = consumer.get_messages(block=True, timeout=1)
             self.assert_message_count(messages, 0)
-        self.assertGreaterEqual(t.interval, 5)
+        self.assertGreaterEqual(t.interval, 1)
 
         self.send_messages(0, range(0, 10))
 
@@ -120,11 +198,19 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
             self.assert_message_count(messages, 5)
         self.assertLessEqual(t.interval, 1)
 
-        # Ask for 10 messages, get 5 back, block 5 seconds
+        # Ask for 10 messages, get 5 back, block 1 second
         with Timer() as t:
-            messages = consumer.get_messages(count=10, block=True, timeout=5)
+            messages = consumer.get_messages(count=10, block=True, timeout=1)
             self.assert_message_count(messages, 5)
-        self.assertGreaterEqual(t.interval, 5)
+        self.assertGreaterEqual(t.interval, 1)
+
+        # Ask for 10 messages, 5 in queue, ask to block for 1 message or 1
+        # second, get 5 back, no blocking
+        self.send_messages(0, range(0, 5))
+        with Timer() as t:
+            messages = consumer.get_messages(count=10, block=1, timeout=1)
+            self.assert_message_count(messages, 5)
+        self.assertLessEqual(t.interval, 1)
 
         consumer.stop()
 
@@ -172,12 +258,12 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
     def test_multi_process_consumer_blocking(self):
         consumer = self.consumer(consumer = MultiProcessConsumer)
 
-        # Ask for 5 messages, No messages in queue, block 5 seconds
+        # Ask for 5 messages, No messages in queue, block 1 second
         with Timer() as t:
-            messages = consumer.get_messages(block=True, timeout=5)
+            messages = consumer.get_messages(block=True, timeout=1)
             self.assert_message_count(messages, 0)
 
-        self.assertGreaterEqual(t.interval, 5)
+        self.assertGreaterEqual(t.interval, 1)
 
         # Send 10 messages
         self.send_messages(0, range(0, 10))
@@ -188,11 +274,21 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
             self.assert_message_count(messages, 5)
         self.assertLessEqual(t.interval, 1)
 
-        # Ask for 10 messages, 5 in queue, block 5 seconds
+        # Ask for 10 messages, 5 in queue, block 1 second
         with Timer() as t:
-            messages = consumer.get_messages(count=10, block=True, timeout=5)
+            messages = consumer.get_messages(count=10, block=True, timeout=1)
             self.assert_message_count(messages, 5)
-        self.assertGreaterEqual(t.interval, 4.95)
+        self.assertGreaterEqual(t.interval, 1)
+
+        # Ask for 10 messages, 5 in queue, ask to block for 1 message or 1
+        # second, get at least one back, no blocking
+        self.send_messages(0, range(0, 5))
+        with Timer() as t:
+            messages = consumer.get_messages(count=10, block=1, timeout=1)
+            received_message_count = len(messages)
+            self.assertGreaterEqual(received_message_count, 1)
+            self.assert_message_count(messages, received_message_count)
+        self.assertLessEqual(t.interval, 1)
 
         consumer.stop()
 
@@ -201,13 +297,34 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
         self.send_messages(0, range(0, 10))
         self.send_messages(1, range(10, 20))
 
-        consumer = MultiProcessConsumer(self.client, "group1", self.topic, auto_commit=False)
+        # set group to None and auto_commit to False to avoid interactions w/
+        # offset commit/fetch apis
+        consumer = MultiProcessConsumer(self.client, None, self.topic,
+                                        auto_commit=False, iter_timeout=0)
 
         self.assertEqual(consumer.pending(), 20)
         self.assertEqual(consumer.pending(partitions=[0]), 10)
         self.assertEqual(consumer.pending(partitions=[1]), 10)
 
         consumer.stop()
+
+    @kafka_versions("0.8.1", "0.8.1.1", "0.8.2.1")
+    def test_multi_process_consumer_load_initial_offsets(self):
+        self.send_messages(0, range(0, 10))
+        self.send_messages(1, range(10, 20))
+
+        # Create 1st consumer and change offsets
+        consumer = self.consumer()
+        self.assertEqual(consumer.offsets, {0: 0, 1: 0})
+        consumer.offsets.update({0:5, 1:15})
+        # Update counter after manual offsets update
+        consumer.count_since_commit += 1
+        consumer.commit()
+
+        # Create 2nd consumer and check initial offsets
+        consumer = self.consumer(consumer = MultiProcessConsumer,
+                                 auto_commit=False)
+        self.assertEqual(consumer.offsets, {0: 5, 1: 15})
 
     @kafka_versions("all")
     def test_large_messages(self):
@@ -257,7 +374,7 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
 
         big_consumer.stop()
 
-    @kafka_versions("0.8.1", "0.8.1.1", "0.8.2.0")
+    @kafka_versions("0.8.1", "0.8.1.1", "0.8.2.1")
     def test_offset_behavior__resuming_behavior(self):
         self.send_messages(0, range(0, 100))
         self.send_messages(1, range(100, 200))
@@ -277,6 +394,41 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
             auto_commit_every_t = None,
             auto_commit_every_n = 20,
         )
+
+        # 181-200
+        self.assert_message_count([ message for message in consumer2 ], 20)
+
+        consumer1.stop()
+        consumer2.stop()
+
+    @kafka_versions("0.8.1", "0.8.1.1", "0.8.2.1")
+    def test_multi_process_offset_behavior__resuming_behavior(self):
+        self.send_messages(0, range(0, 100))
+        self.send_messages(1, range(100, 200))
+
+        # Start a consumer
+        consumer1 = self.consumer(
+            consumer=MultiProcessConsumer,
+            auto_commit_every_t = None,
+            auto_commit_every_n = 20,
+            )
+
+        # Grab the first 195 messages
+        output_msgs1 = []
+        idx = 0
+        for message in consumer1:
+            output_msgs1.append(message.message.value)
+            idx += 1
+            if idx >= 195:
+                break
+        self.assert_message_count(output_msgs1, 195)
+
+        # The total offset across both partitions should be at 180
+        consumer2 = self.consumer(
+            consumer=MultiProcessConsumer,
+            auto_commit_every_t = None,
+            auto_commit_every_n = 20,
+            )
 
         # 181-200
         self.assert_message_count([ message for message in consumer2 ], 20)
@@ -330,7 +482,7 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
         consumer = self.kafka_consumer(auto_offset_reset='smallest',
                                        consumer_timeout_ms=TIMEOUT_MS)
 
-        # Ask for 5 messages, nothing in queue, block 5 seconds
+        # Ask for 5 messages, nothing in queue, block 500ms
         with Timer() as t:
             with self.assertRaises(ConsumerTimeout):
                 msg = consumer.next()
@@ -347,7 +499,7 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
         self.assertEqual(len(messages), 5)
         self.assertLess(t.interval, TIMEOUT_MS / 1000.0 )
 
-        # Ask for 10 messages, get 5 back, block 5 seconds
+        # Ask for 10 messages, get 5 back, block 500ms
         messages = set()
         with Timer() as t:
             with self.assertRaises(ConsumerTimeout):
@@ -357,9 +509,9 @@ class TestConsumerIntegration(KafkaIntegrationTestCase):
         self.assertEqual(len(messages), 5)
         self.assertGreaterEqual(t.interval, TIMEOUT_MS / 1000.0 )
 
-    @kafka_versions("0.8.1", "0.8.1.1", "0.8.2.0")
+    @kafka_versions("0.8.1", "0.8.1.1", "0.8.2.1")
     def test_kafka_consumer__offset_commit_resume(self):
-        GROUP_ID = random_string(10)
+        GROUP_ID = random_string(10).encode('utf-8')
 
         self.send_messages(0, range(0, 100))
         self.send_messages(1, range(100, 200))

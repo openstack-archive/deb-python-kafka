@@ -13,7 +13,7 @@ from kafka.common import (
     ProduceResponse, FetchResponse, OffsetAndMessage,
     BrokerMetadata, TopicMetadata, PartitionMetadata, TopicAndPartition,
     KafkaUnavailableError, UnsupportedCodecError, ConsumerFetchSizeTooSmall,
-    ProtocolError
+    ProtocolError, ConsumerMetadataResponse
 )
 from kafka.protocol import (
     ATTRIBUTE_CODEC_MASK, CODEC_NONE, CODEC_GZIP, CODEC_SNAPPY, KafkaProtocol,
@@ -32,7 +32,7 @@ class TestProtocol(unittest.TestCase):
         self.assertEqual(msg.value, payload)
 
     def test_create_gzip(self):
-        payloads = [b"v1", b"v2"]
+        payloads = [(b"v1", None), (b"v2", None)]
         msg = create_gzip_message(payloads)
         self.assertEqual(msg.magic, 0)
         self.assertEqual(msg.attributes, ATTRIBUTE_CODEC_MASK & CODEC_GZIP)
@@ -59,9 +59,39 @@ class TestProtocol(unittest.TestCase):
 
         self.assertEqual(decoded, expect)
 
+    def test_create_gzip_keyed(self):
+        payloads = [(b"v1", b"k1"), (b"v2", b"k2")]
+        msg = create_gzip_message(payloads)
+        self.assertEqual(msg.magic, 0)
+        self.assertEqual(msg.attributes, ATTRIBUTE_CODEC_MASK & CODEC_GZIP)
+        self.assertEqual(msg.key, None)
+        # Need to decode to check since gzipped payload is non-deterministic
+        decoded = gzip_decode(msg.value)
+        expect = b"".join([
+            struct.pack(">q", 0),          # MsgSet Offset
+            struct.pack(">i", 18),         # Msg Size
+            struct.pack(">i", 1474775406), # CRC
+            struct.pack(">bb", 0, 0),      # Magic, flags
+            struct.pack(">i", 2),          # Length of key
+            b"k1",                         # Key
+            struct.pack(">i", 2),          # Length of value
+            b"v1",                         # Value
+
+            struct.pack(">q", 0),          # MsgSet Offset
+            struct.pack(">i", 18),         # Msg Size
+            struct.pack(">i", -16383415),  # CRC
+            struct.pack(">bb", 0, 0),      # Magic, flags
+            struct.pack(">i", 2),          # Length of key
+            b"k2",                         # Key
+            struct.pack(">i", 2),          # Length of value
+            b"v2",                         # Value
+        ])
+
+        self.assertEqual(decoded, expect)
+
     @unittest.skipUnless(has_snappy(), "Snappy not available")
     def test_create_snappy(self):
-        payloads = [b"v1", b"v2"]
+        payloads = [(b"v1", None), (b"v2", None)]
         msg = create_snappy_message(payloads)
         self.assertEqual(msg.magic, 0)
         self.assertEqual(msg.attributes, ATTRIBUTE_CODEC_MASK & CODEC_SNAPPY)
@@ -83,6 +113,36 @@ class TestProtocol(unittest.TestCase):
             struct.pack(">i", -1),         # -1 indicates a null key
             struct.pack(">i", 2),          # Msg length (bytes)
             b"v2",                         # Message contents
+        ])
+
+        self.assertEqual(decoded, expect)
+
+    @unittest.skipUnless(has_snappy(), "Snappy not available")
+    def test_create_snappy_keyed(self):
+        payloads = [(b"v1", b"k1"), (b"v2", b"k2")]
+        msg = create_snappy_message(payloads)
+        self.assertEqual(msg.magic, 0)
+        self.assertEqual(msg.attributes, ATTRIBUTE_CODEC_MASK & CODEC_SNAPPY)
+        self.assertEqual(msg.key, None)
+        decoded = snappy_decode(msg.value)
+        expect = b"".join([
+            struct.pack(">q", 0),          # MsgSet Offset
+            struct.pack(">i", 18),         # Msg Size
+            struct.pack(">i", 1474775406), # CRC
+            struct.pack(">bb", 0, 0),      # Magic, flags
+            struct.pack(">i", 2),          # Length of key
+            b"k1",                         # Key
+            struct.pack(">i", 2),          # Length of value
+            b"v1",                         # Value
+
+            struct.pack(">q", 0),          # MsgSet Offset
+            struct.pack(">i", 18),         # Msg Size
+            struct.pack(">i", -16383415),  # CRC
+            struct.pack(">bb", 0, 0),      # Magic, flags
+            struct.pack(">i", 2),          # Length of key
+            b"k2",                         # Key
+            struct.pack(">i", 2),          # Length of value
+            b"v2",                         # Value
         ])
 
         self.assertEqual(decoded, expect)
@@ -500,6 +560,34 @@ class TestProtocol(unittest.TestCase):
         decoded = KafkaProtocol.decode_metadata_response(encoded)
         self.assertEqual(decoded, (node_brokers, topic_partitions))
 
+    def test_encode_consumer_metadata_request(self):
+        expected = b"".join([
+            struct.pack(">i", 17),         # Total length of the request
+            struct.pack('>h', 10),         # API key consumer metadata
+            struct.pack('>h', 0),          # API version
+            struct.pack('>i', 4),          # Correlation ID
+            struct.pack('>h3s', 3, b"cid"),# The client ID
+            struct.pack('>h2s', 2, b"g1"), # Group "g1"
+        ])
+
+        encoded = KafkaProtocol.encode_consumer_metadata_request(b"cid", 4, b"g1")
+
+        self.assertEqual(encoded, expected)
+
+    def test_decode_consumer_metadata_response(self):
+        encoded = b"".join([
+            struct.pack(">i", 42),                                 # Correlation ID
+            struct.pack(">h", 0),                                  # No Error
+            struct.pack(">i", 1),                                  # Broker ID
+            struct.pack(">h23s", 23, b"brokers1.kafka.rdio.com"),  # Broker Host
+            struct.pack(">i", 1000),                               # Broker Port
+        ])
+
+        results = KafkaProtocol.decode_consumer_metadata_response(encoded)
+        self.assertEqual(results,
+            ConsumerMetadataResponse(error = 0, nodeId = 1, host = b'brokers1.kafka.rdio.com', port = 1000)
+        )
+
     def test_encode_offset_request(self):
         expected = b"".join([
             struct.pack(">i", 21),         # Total length of the request
@@ -701,7 +789,7 @@ class TestProtocol(unittest.TestCase):
                     yield
 
     def test_create_message_set(self):
-        messages = [1, 2, 3]
+        messages = [(1, "k1"), (2, "k2"), (3, "k3")]
 
         # Default codec is CODEC_NONE. Expect list of regular messages.
         expect = [sentinel.message] * len(messages)

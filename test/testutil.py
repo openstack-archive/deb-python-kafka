@@ -12,6 +12,7 @@ from . import unittest
 
 from kafka import KafkaClient
 from kafka.common import OffsetRequest
+from kafka.util import kafka_bytestring
 
 __all__ = [
     'random_string',
@@ -22,8 +23,7 @@ __all__ = [
 ]
 
 def random_string(l):
-    s = "".join(random.choice(string.ascii_letters) for i in xrange(l))
-    return s.encode('utf-8')
+    return "".join(random.choice(string.ascii_letters) for i in xrange(l))
 
 def kafka_versions(*versions):
     def kafka_versions(func):
@@ -50,6 +50,8 @@ def get_open_port():
 class KafkaIntegrationTestCase(unittest.TestCase):
     create_client = True
     topic = None
+    bytes_topic = None
+    zk = None
     server = None
 
     def setUp(self):
@@ -58,8 +60,9 @@ class KafkaIntegrationTestCase(unittest.TestCase):
             return
 
         if not self.topic:
-            topic = "%s-%s" % (self.id()[self.id().rindex(".") + 1:], random_string(10).decode('utf-8'))
-            self.topic = topic.encode('utf-8')
+            topic = "%s-%s" % (self.id()[self.id().rindex(".") + 1:], random_string(10))
+            self.topic = topic
+            self.bytes_topic = topic.encode('utf-8')
 
         if self.create_client:
             self.client = KafkaClient('%s:%d' % (self.server.host, self.server.port))
@@ -77,8 +80,15 @@ class KafkaIntegrationTestCase(unittest.TestCase):
             self.client.close()
 
     def current_offset(self, topic, partition):
-        offsets, = self.client.send_offset_request([ OffsetRequest(topic, partition, -1, 1) ])
-        return offsets.offsets[0]
+        try:
+            offsets, = self.client.send_offset_request([ OffsetRequest(kafka_bytestring(topic), partition, -1, 1) ])
+        except:
+            # XXX: We've seen some UnknownErrors here and cant debug w/o server logs
+            self.zk.child.dump_logs()
+            self.server.child.dump_logs()
+            raise
+        else:
+            return offsets.offsets[0]
 
     def msgs(self, iterable):
         return [ self.msg(x) for x in iterable ]
@@ -103,3 +113,8 @@ class Timer(object):
         self.interval = self.end - self.start
 
 logging.basicConfig(level=logging.DEBUG)
+logging.getLogger('test.fixtures').setLevel(logging.ERROR)
+logging.getLogger('test.service').setLevel(logging.ERROR)
+
+# kafka.conn debug logging is verbose, disable in tests by default
+logging.getLogger('kafka.conn').setLevel(logging.INFO)

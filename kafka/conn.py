@@ -9,7 +9,8 @@ import six
 
 from kafka.common import ConnectionError
 
-log = logging.getLogger("kafka")
+
+log = logging.getLogger(__name__)
 
 DEFAULT_SOCKET_TIMEOUT_SECONDS = 120
 DEFAULT_KAFKA_PORT = 9092
@@ -61,6 +62,9 @@ class KafkaConnection(local):
         self._sock = None
 
         self.reinit()
+
+    def __getnewargs__(self):
+        return (self.host, self.port, self.timeout)
 
     def __repr__(self):
         return "<KafkaConnection host=%s port=%d>" % (self.host, self.port)
@@ -114,6 +118,11 @@ class KafkaConnection(local):
 
     # TODO multiplex socket communication to allow for multi-threaded clients
 
+    def get_connected_socket(self):
+        if not self._sock:
+            self.reinit()
+        return self._sock
+
     def send(self, request_id, payload):
         """
         Send a request to Kafka
@@ -147,6 +156,10 @@ class KafkaConnection(local):
         """
         log.debug("Reading response %d from Kafka" % request_id)
 
+        # Make sure we have a connection
+        if not self._sock:
+            self.reinit()
+
         # Read the size off of the header
         resp = self._read_bytes(4)
         (size,) = struct.unpack('>i', resp)
@@ -157,9 +170,11 @@ class KafkaConnection(local):
 
     def copy(self):
         """
-        Create an inactive copy of the connection object
-        A reinit() has to be done on the copy before it can be used again
-        return a new KafkaConnection object
+        Create an inactive copy of the connection object, suitable for
+        passing to a background thread.
+
+        The returned copy is not connected; you must call reinit() before
+        using.
         """
         c = copy.deepcopy(self)
         # Python 3 doesn't copy custom attributes of the threadlocal subclass

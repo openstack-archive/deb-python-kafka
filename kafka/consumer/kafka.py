@@ -25,7 +25,7 @@ OffsetsStruct = namedtuple("OffsetsStruct", ["fetch", "highwater", "commit", "ta
 DEFAULT_CONSUMER_CONFIG = {
     'client_id': __name__,
     'group_id': None,
-    'metadata_broker_list': None,
+    'bootstrap_servers': [],
     'socket_timeout_ms': 30 * 1000,
     'fetch_message_max_bytes': 1024 * 1024,
     'auto_offset_reset': 'largest',
@@ -47,150 +47,100 @@ DEFAULT_CONSUMER_CONFIG = {
     'rebalance_backoff_ms': 2000,
 }
 
-BYTES_CONFIGURATION_KEYS = ('client_id', 'group_id')
-
+DEPRECATED_CONFIG_KEYS = {
+    'metadata_broker_list': 'bootstrap_servers',
+}
 
 class KafkaConsumer(object):
-    """
-    A simpler kafka consumer
-
-    .. code:: python
-
-        # A very basic 'tail' consumer, with no stored offset management
-        kafka = KafkaConsumer('topic1')
-        for m in kafka:
-          print m
-
-        # Alternate interface: next()
-        print kafka.next()
-
-        # Alternate interface: batch iteration
-        while True:
-          for m in kafka.fetch_messages():
-            print m
-          print "Done with batch - let's do another!"
-
-
-    .. code:: python
-
-        # more advanced consumer -- multiple topics w/ auto commit offset management
-        kafka = KafkaConsumer('topic1', 'topic2',
-                              group_id='my_consumer_group',
-                              auto_commit_enable=True,
-                              auto_commit_interval_ms=30 * 1000,
-                              auto_offset_reset='smallest')
-
-        # Infinite iteration
-        for m in kafka:
-          process_message(m)
-          kafka.task_done(m)
-
-        # Alternate interface: next()
-        m = kafka.next()
-        process_message(m)
-        kafka.task_done(m)
-
-        # If auto_commit_enable is False, remember to commit() periodically
-        kafka.commit()
-
-        # Batch process interface
-        while True:
-          for m in kafka.fetch_messages():
-            process_message(m)
-            kafka.task_done(m)
-
-
-    messages (m) are namedtuples with attributes:
-
-      * `m.topic`: topic name (str)
-      * `m.partition`: partition number (int)
-      * `m.offset`: message offset on topic-partition log (int)
-      * `m.key`: key (bytes - can be None)
-      * `m.value`: message (output of deserializer_class - default is raw bytes)
-
-    Configuration settings can be passed to constructor,
-    otherwise defaults will be used:
-
-    .. code:: python
-
-        client_id='kafka.consumer.kafka',
-        group_id=None,
-        fetch_message_max_bytes=1024*1024,
-        fetch_min_bytes=1,
-        fetch_wait_max_ms=100,
-        refresh_leader_backoff_ms=200,
-        metadata_broker_list=None,
-        socket_timeout_ms=30*1000,
-        auto_offset_reset='largest',
-        deserializer_class=lambda msg: msg,
-        auto_commit_enable=False,
-        auto_commit_interval_ms=60 * 1000,
-        consumer_timeout_ms=-1
-
-    Configuration parameters are described in more detail at
-    http://kafka.apache.org/documentation.html#highlevelconsumerapi
-    """
+    """A simpler kafka consumer"""
+    DEFAULT_CONFIG = deepcopy(DEFAULT_CONSUMER_CONFIG)
 
     def __init__(self, *topics, **configs):
         self.configure(**configs)
         self.set_topic_partitions(*topics)
 
     def configure(self, **configs):
-        """
+        """Configure the consumer instance
+
         Configuration settings can be passed to constructor,
         otherwise defaults will be used:
 
-        .. code:: python
-
-            client_id='kafka.consumer.kafka',
-            group_id=None,
-            fetch_message_max_bytes=1024*1024,
-            fetch_min_bytes=1,
-            fetch_wait_max_ms=100,
-            refresh_leader_backoff_ms=200,
-            metadata_broker_list=None,
-            socket_timeout_ms=30*1000,
-            auto_offset_reset='largest',
-            deserializer_class=lambda msg: msg,
-            auto_commit_enable=False,
-            auto_commit_interval_ms=60 * 1000,
-            auto_commit_interval_messages=None,
-            consumer_timeout_ms=-1
+        Keyword Arguments:
+            bootstrap_servers (list): List of initial broker nodes the consumer
+                should contact to bootstrap initial cluster metadata.  This does
+                not have to be the full node list.  It just needs to have at
+                least one broker that will respond to a Metadata API Request.
+            client_id (str): a unique name for this client.  Defaults to
+                'kafka.consumer.kafka'.
+            group_id (str): the name of the consumer group to join,
+                Offsets are fetched / committed to this group name.
+            fetch_message_max_bytes (int, optional): Maximum bytes for each
+                topic/partition fetch request.  Defaults to 1024*1024.
+            fetch_min_bytes (int, optional): Minimum amount of data the server
+                should return for a fetch request, otherwise wait up to
+                fetch_wait_max_ms for more data to accumulate.  Defaults to 1.
+            fetch_wait_max_ms (int, optional): Maximum time for the server to
+                block waiting for fetch_min_bytes messages to accumulate.
+                Defaults to 100.
+            refresh_leader_backoff_ms (int, optional): Milliseconds to backoff
+                when refreshing metadata on errors (subject to random jitter).
+                Defaults to 200.
+            socket_timeout_ms (int, optional): TCP socket timeout in
+                milliseconds.  Defaults to 30*1000.
+            auto_offset_reset (str, optional): A policy for resetting offsets on
+                OffsetOutOfRange errors. 'smallest' will move to the oldest
+                available message, 'largest' will move to the most recent.  Any
+                ofther value will raise the exception.  Defaults to 'largest'.
+            deserializer_class (callable, optional):  Any callable that takes a
+                raw message value and returns a deserialized value.  Defaults to
+                 lambda msg: msg.
+            auto_commit_enable (bool, optional): Enabling auto-commit will cause
+                the KafkaConsumer to periodically commit offsets without an
+                explicit call to commit().  Defaults to False.
+            auto_commit_interval_ms (int, optional):  If auto_commit_enabled,
+                the milliseconds between automatic offset commits.  Defaults to
+                60 * 1000.
+            auto_commit_interval_messages (int, optional): If
+                auto_commit_enabled, a number of messages consumed between
+                automatic offset commits.  Defaults to None (disabled).
+            consumer_timeout_ms (int, optional): number of millisecond to throw
+                a timeout exception to the consumer if no message is available
+                for consumption.  Defaults to -1 (dont throw exception).
 
         Configuration parameters are described in more detail at
         http://kafka.apache.org/documentation.html#highlevelconsumerapi
         """
+        configs = self._deprecate_configs(**configs)
         self._config = {}
-        for key in DEFAULT_CONSUMER_CONFIG:
-            self._config[key] = configs.pop(key, DEFAULT_CONSUMER_CONFIG[key])
+        for key in self.DEFAULT_CONFIG:
+            self._config[key] = configs.pop(key, self.DEFAULT_CONFIG[key])
 
         if configs:
             raise KafkaConfigurationError('Unknown configuration key(s): ' +
                                           str(list(configs.keys())))
 
-        # Handle str/bytes conversions
-        for config_key in BYTES_CONFIGURATION_KEYS:
-            if isinstance(self._config[config_key], six.string_types):
-                logger.warning("Converting configuration key '%s' to bytes" %
-                               config_key)
-                self._config[config_key] = self._config[config_key].encode('utf-8')
-
         if self._config['auto_commit_enable']:
             if not self._config['group_id']:
-                raise KafkaConfigurationError('KafkaConsumer configured to auto-commit without required consumer group (group_id)')
+                raise KafkaConfigurationError(
+                    'KafkaConsumer configured to auto-commit '
+                    'without required consumer group (group_id)'
+                )
 
         # Check auto-commit configuration
         if self._config['auto_commit_enable']:
             logger.info("Configuring consumer to auto-commit offsets")
             self._reset_auto_commit()
 
-        if self._config['metadata_broker_list'] is None:
-            raise KafkaConfigurationError('metadata_broker_list required to '
-                                          'configure KafkaConsumer')
+        if not self._config['bootstrap_servers']:
+            raise KafkaConfigurationError(
+                'bootstrap_servers required to configure KafkaConsumer'
+            )
 
-        self._client = KafkaClient(self._config['metadata_broker_list'],
-                                   client_id=self._config['client_id'],
-                                   timeout=(self._config['socket_timeout_ms'] / 1000.0))
+        self._client = KafkaClient(
+            self._config['bootstrap_servers'],
+            client_id=self._config['client_id'],
+            timeout=(self._config['socket_timeout_ms'] / 1000.0)
+        )
 
     def set_topic_partitions(self, *topics):
         """
@@ -220,12 +170,12 @@ class KafkaConsumer(object):
             # Consume topic1-all; topic2-partition2; topic3-partition0
             kafka.set_topic_partitions("topic1", ("topic2", 2), {"topic3": 0})
 
-            # Consume topic1-0 starting at offset 123, and topic2-1 at offset 456
+            # Consume topic1-0 starting at offset 12, and topic2-1 at offset 45
             # using tuples --
-            kafka.set_topic_partitions(("topic1", 0, 123), ("topic2", 1, 456))
+            kafka.set_topic_partitions(("topic1", 0, 12), ("topic2", 1, 45))
 
             # using dict --
-            kafka.set_topic_partitions({ ("topic1", 0): 123, ("topic2", 1): 456 })
+            kafka.set_topic_partitions({ ("topic1", 0): 12, ("topic2", 1): 45 })
 
         """
         self._topics = []
@@ -251,10 +201,10 @@ class KafkaConsumer(object):
             elif isinstance(arg, tuple):
                 topic = kafka_bytestring(arg[0])
                 partition = arg[1]
+                self._consume_topic_partition(topic, partition)
                 if len(arg) == 3:
                     offset = arg[2]
                     self._offsets.fetch[(topic, partition)] = offset
-                self._consume_topic_partition(topic, partition)
 
             # { topic: partitions, ... } dict
             elif isinstance(arg, dict):
@@ -273,15 +223,17 @@ class KafkaConsumer(object):
                             for partition in value:
                                 self._consume_topic_partition(topic, partition)
                         else:
-                            raise KafkaConfigurationError('Unknown topic type (dict key must be '
-                                                          'int or list/tuple of ints)')
+                            raise KafkaConfigurationError(
+                                'Unknown topic type '
+                                '(dict key must be int or list/tuple of ints)'
+                            )
 
                     # (topic, partition): offset
                     elif isinstance(key, tuple):
                         topic = kafka_bytestring(key[0])
                         partition = key[1]
                         self._consume_topic_partition(topic, partition)
-                        self._offsets.fetch[key] = value
+                        self._offsets.fetch[(topic, partition)] = value
 
             else:
                 raise KafkaConfigurationError('Unknown topic type (%s)' % type(arg))
@@ -317,19 +269,23 @@ class KafkaConsumer(object):
         # Reset message iterator in case we were in the middle of one
         self._reset_message_iterator()
 
+    def close(self):
+        """Close this consumer's underlying client."""
+        self._client.close()
+
     def next(self):
-        """
-        Return a single message from the message iterator
-        If consumer_timeout_ms is set, will raise ConsumerTimeout
-        if no message is available
-        Otherwise blocks indefinitely
+        """Return the next available message
 
-        Note that this is also the method called internally during iteration:
+        Blocks indefinitely unless consumer_timeout_ms > 0
 
-        .. code:: python
+        Returns:
+            a single KafkaMessage from the message iterator
 
-            for m in consumer:
-                pass
+        Raises:
+            ConsumerTimeout after consumer_timeout_ms and no message
+
+        Note:
+            This is also the method called internally during iteration
 
         """
         self._set_consumer_timeout_start()
@@ -345,110 +301,129 @@ class KafkaConsumer(object):
             self._check_consumer_timeout()
 
     def fetch_messages(self):
-        """
-        Sends FetchRequests for all topic/partitions set for consumption
-        Returns a generator that yields KafkaMessage structs
-        after deserializing with the configured `deserializer_class`
+        """Sends FetchRequests for all topic/partitions set for consumption
 
-        Refreshes metadata on errors, and resets fetch offset on
-        OffsetOutOfRange, per the configured `auto_offset_reset` policy
+        Returns:
+            Generator that yields KafkaMessage structs
+            after deserializing with the configured `deserializer_class`
 
-        Key configuration parameters:
+        Note:
+            Refreshes metadata on errors, and resets fetch offset on
+            OffsetOutOfRange, per the configured `auto_offset_reset` policy
 
-        * `fetch_message_max_bytes`
-        * `fetch_max_wait_ms`
-        * `fetch_min_bytes`
-        * `deserializer_class`
-        * `auto_offset_reset`
+        See Also:
+            Key KafkaConsumer configuration parameters:
+            * `fetch_message_max_bytes`
+            * `fetch_max_wait_ms`
+            * `fetch_min_bytes`
+            * `deserializer_class`
+            * `auto_offset_reset`
+
         """
 
         max_bytes = self._config['fetch_message_max_bytes']
         max_wait_time = self._config['fetch_wait_max_ms']
         min_bytes = self._config['fetch_min_bytes']
 
-        # Get current fetch offsets
-        offsets = self._offsets.fetch
-        if not offsets:
-            if not self._topics:
-                raise KafkaConfigurationError('No topics or partitions configured')
-            raise KafkaConfigurationError('No fetch offsets found when calling fetch_messages')
+        if not self._topics:
+            raise KafkaConfigurationError('No topics or partitions configured')
 
-        fetches = []
-        for topic_partition, offset in six.iteritems(offsets):
-            fetches.append(FetchRequest(topic_partition[0], topic_partition[1], offset, max_bytes))
+        if not self._offsets.fetch:
+            raise KafkaConfigurationError(
+                'No fetch offsets found when calling fetch_messages'
+            )
 
-        # client.send_fetch_request will collect topic/partition requests by leader
-        # and send each group as a single FetchRequest to the correct broker
-        try:
-            responses = self._client.send_fetch_request(fetches,
-                                                        max_wait_time=max_wait_time,
-                                                        min_bytes=min_bytes,
-                                                        fail_on_error=False)
-        except FailedPayloadsError:
-            logger.warning('FailedPayloadsError attempting to fetch data from kafka')
-            self._refresh_metadata_on_error()
-            return
+        fetches = [FetchRequest(topic, partition,
+                                self._offsets.fetch[(topic, partition)],
+                                max_bytes)
+                   for (topic, partition) in self._topics]
+
+        # send_fetch_request will batch topic/partition requests by leader
+        responses = self._client.send_fetch_request(
+            fetches,
+            max_wait_time=max_wait_time,
+            min_bytes=min_bytes,
+            fail_on_error=False
+        )
 
         for resp in responses:
-            topic_partition = (resp.topic, resp.partition)
+
+            if isinstance(resp, FailedPayloadsError):
+                logger.warning('FailedPayloadsError attempting to fetch data')
+                self._refresh_metadata_on_error()
+                continue
+
+            topic = kafka_bytestring(resp.topic)
+            partition = resp.partition
             try:
                 check_error(resp)
             except OffsetOutOfRangeError:
-                logger.warning('OffsetOutOfRange: topic %s, partition %d, offset %d '
-                               '(Highwatermark: %d)',
-                               resp.topic, resp.partition,
-                               offsets[topic_partition], resp.highwaterMark)
+                logger.warning('OffsetOutOfRange: topic %s, partition %d, '
+                               'offset %d (Highwatermark: %d)',
+                               topic, partition,
+                               self._offsets.fetch[(topic, partition)],
+                               resp.highwaterMark)
                 # Reset offset
-                self._offsets.fetch[topic_partition] = self._reset_partition_offset(topic_partition)
+                self._offsets.fetch[(topic, partition)] = (
+                    self._reset_partition_offset((topic, partition))
+                )
                 continue
 
             except NotLeaderForPartitionError:
                 logger.warning("NotLeaderForPartitionError for %s - %d. "
                                "Metadata may be out of date",
-                               resp.topic, resp.partition)
+                               topic, partition)
                 self._refresh_metadata_on_error()
                 continue
 
             except RequestTimedOutError:
                 logger.warning("RequestTimedOutError for %s - %d",
-                               resp.topic, resp.partition)
+                               topic, partition)
                 continue
 
             # Track server highwater mark
-            self._offsets.highwater[topic_partition] = resp.highwaterMark
+            self._offsets.highwater[(topic, partition)] = resp.highwaterMark
 
             # Yield each message
             # Kafka-python could raise an exception during iteration
             # we are not catching -- user will need to address
             for (offset, message) in resp.messages:
                 # deserializer_class could raise an exception here
-                msg = KafkaMessage(resp.topic,
-                                   resp.partition,
-                                   offset, message.key,
-                                   self._config['deserializer_class'](message.value))
+                val = self._config['deserializer_class'](message.value)
+                msg = KafkaMessage(topic, partition, offset, message.key, val)
 
-                # Only increment fetch offset if we safely got the message and deserialized
-                self._offsets.fetch[topic_partition] = offset + 1
+                # in some cases the server will return earlier messages
+                # than we requested. skip them per kafka spec
+                if offset < self._offsets.fetch[(topic, partition)]:
+                    logger.debug('message offset less than fetched offset '
+                                 'skipping: %s', msg)
+                    continue
+                # Only increment fetch offset
+                # if we safely got the message and deserialized
+                self._offsets.fetch[(topic, partition)] = offset + 1
 
                 # Then yield to user
                 yield msg
 
     def get_partition_offsets(self, topic, partition, request_time_ms, max_num_offsets):
-        """
-        Request available fetch offsets for a single topic/partition
+        """Request available fetch offsets for a single topic/partition
 
-        Arguments:
-            topic (str)
-            partition (int)
+        Keyword Arguments:
+            topic (str): topic for offset request
+            partition (int): partition for offset request
             request_time_ms (int): Used to ask for all messages before a
-                certain time (ms). There are two special values. Specify -1 to receive the latest
-                offset (i.e. the offset of the next coming message) and -2 to receive the earliest
-                available offset. Note that because offsets are pulled in descending order, asking for
-                the earliest offset will always return you a single element.
-            max_num_offsets (int)
+                certain time (ms). There are two special values.
+                Specify -1 to receive the latest offset (i.e. the offset of the
+                next coming message) and -2 to receive the earliest available
+                offset. Note that because offsets are pulled in descending
+                order, asking for the earliest offset will always return you a
+                single element.
+            max_num_offsets (int): Maximum offsets to include in the OffsetResponse
 
         Returns:
-            offsets (list)
+            a list of offsets in the OffsetResponse submitted for the provided
+            topic / partition. See:
+            https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-OffsetAPI
         """
         reqs = [OffsetRequest(topic, partition, request_time_ms, max_num_offsets)]
 
@@ -464,7 +439,8 @@ class KafkaConsumer(object):
         return resp.offsets
 
     def offsets(self, group=None):
-        """
+        """Get internal consumer offset values
+
         Keyword Arguments:
             group: Either "fetch", "commit", "task_done", or "highwater".
                 If no group specified, returns all groups.
@@ -483,12 +459,25 @@ class KafkaConsumer(object):
             return dict(deepcopy(getattr(self._offsets, group)))
 
     def task_done(self, message):
-        """
-        Mark a fetched message as consumed.
+        """Mark a fetched message as consumed.
+
         Offsets for messages marked as "task_done" will be stored back
         to the kafka cluster for this consumer group on commit()
+
+        Arguments:
+            message (KafkaMessage): the message to mark as complete
+
+        Returns:
+            True, unless the topic-partition for this message has not
+            been configured for the consumer. In normal operation, this
+            should not happen. But see github issue 364.
         """
         topic_partition = (message.topic, message.partition)
+        if topic_partition not in self._topics:
+            logger.warning('Unrecognized topic/partition in task_done message: '
+                           '{0}:{1}'.format(*topic_partition))
+            return False
+
         offset = message.offset
 
         # Warn on non-contiguous offsets
@@ -513,17 +502,25 @@ class KafkaConsumer(object):
         if self._should_auto_commit():
             self.commit()
 
+        return True
+
     def commit(self):
-        """
-        Store consumed message offsets (marked via task_done())
+        """Store consumed message offsets (marked via task_done())
         to kafka cluster for this consumer_group.
 
-        **Note**: this functionality requires server version >=0.8.1.1
-        See `this wiki page <https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-OffsetCommit/FetchAPI>`_.
+        Returns:
+            True on success, or False if no offsets were found for commit
+
+        Note:
+            this functionality requires server version >=0.8.1.1
+            https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-OffsetCommit/FetchAPI
         """
         if not self._config['group_id']:
             logger.warning('Cannot commit without a group_id!')
-            raise KafkaConfigurationError('Attempted to commit offsets without a configured consumer group (group_id)')
+            raise KafkaConfigurationError(
+                'Attempted to commit offsets '
+                'without a configured consumer group (group_id)'
+            )
 
         # API supports storing metadata with each commit
         # but for now it is unused
@@ -547,13 +544,17 @@ class KafkaConsumer(object):
             if commit_offset == self._offsets.commit[topic_partition]:
                 continue
 
-            commits.append(OffsetCommitRequest(topic_partition[0], topic_partition[1], commit_offset, metadata))
+            commits.append(
+                OffsetCommitRequest(topic_partition[0], topic_partition[1],
+                                    commit_offset, metadata)
+            )
 
         if commits:
             logger.info('committing consumer offsets to group %s', self._config['group_id'])
-            resps = self._client.send_offset_commit_request(self._config['group_id'],
-                                                            commits,
-                                                            fail_on_error=False)
+            resps = self._client.send_offset_commit_request(
+                kafka_bytestring(self._config['group_id']), commits,
+                fail_on_error=False
+            )
 
             for r in resps:
                 check_error(r)
@@ -615,7 +616,7 @@ class KafkaConsumer(object):
         logger.info("Consumer fetching stored offsets")
         for topic_partition in self._topics:
             (resp,) = self._client.send_offset_fetch_request(
-                self._config['group_id'],
+                kafka_bytestring(self._config['group_id']),
                 [OffsetFetchRequest(topic_partition[0], topic_partition[1])],
                 fail_on_error=False)
             try:
@@ -664,7 +665,7 @@ class KafkaConsumer(object):
             # Otherwise we should re-raise the upstream exception
             # b/c it typically includes additional data about
             # the request that triggered it, and we do not want to drop that
-            raise
+            raise # pylint: disable-msg=E0704
 
         (offset, ) = self.get_partition_offsets(topic, partition,
                                                 request_time_ms, max_num_offsets=1)
@@ -750,6 +751,22 @@ class KafkaConsumer(object):
     #
 
     def __repr__(self):
-        return '<KafkaConsumer topics=(%s)>' % ', '.join(["%s-%d" % topic_partition
-                                                          for topic_partition in
-                                                          self._topics])
+        return '<{0} topics=({1})>'.format(
+            self.__class__.__name__,
+            '|'.join(["%s-%d" % topic_partition
+                      for topic_partition in self._topics])
+        )
+
+    #
+    # other private methods
+    #
+
+    def _deprecate_configs(self, **configs):
+        for old, new in six.iteritems(DEPRECATED_CONFIG_KEYS):
+            if old in configs:
+                logger.warning('Deprecated Kafka Consumer configuration: %s. '
+                               'Please use %s instead.', old, new)
+                old_value = configs.pop(old)
+                if new not in configs:
+                    configs[new] = old_value
+        return configs

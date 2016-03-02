@@ -1,10 +1,10 @@
 import sys
-
+import os
 from setuptools import setup, Command
 
-with open('VERSION', 'r') as v:
-    __version__ = v.read().rstrip()
-
+# Pull version from source without importing
+# since we can't import something we haven't built yet :)
+exec(open('kafka/version.py').read())
 
 class Tox(Command):
 
@@ -26,6 +26,10 @@ test_require = ['tox', 'mock']
 if sys.version_info < (2, 7):
     test_require.append('unittest2')
 
+here = os.path.abspath(os.path.dirname(__file__))
+
+with open(os.path.join(here, 'README.rst')) as f:
+    README = f.read()
 
 setup(
     name="kafka-python",
@@ -41,20 +45,15 @@ setup(
         "kafka.producer",
     ],
 
-    author="David Arthur",
-    author_email="mumrah@gmail.com",
-    url="https://github.com/mumrah/kafka-python",
+    author="Dana Powers",
+    author_email="dana.powers@gmail.com",
+    url="https://github.com/dpkp/kafka-python",
     license="Apache License 2.0",
     description="Pure Python client for Apache Kafka",
-    long_description="""
-This module provides low-level protocol support for Apache Kafka as well as
-high-level consumer and producer classes. Request batching is supported by the
-protocol as well as broker-aware request routing. Gzip and Snappy compression
-is also supported for message sets.
-""",
+    long_description=README,
     keywords="apache kafka",
     install_requires=['six'],
-    classifiers = [
+    classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: Apache Software License",
@@ -62,6 +61,10 @@ is also supported for message sets.
         "Programming Language :: Python :: 2",
         "Programming Language :: Python :: 2.6",
         "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.3",
+        "Programming Language :: Python :: 3.4",
+        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: Implementation :: PyPy",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ]
