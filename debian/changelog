@@ -1,6 +1,7 @@
 python-kafka (0.9.5-2) UNRELEASED; urgency=medium
 
   * Standards-Version is 3.9.8 now (no change)
+  * d/rules: Changed UPSTREAM_GIT protocol to https
 
  -- Ondřej Nový <novy@ondrej.org>  Sat, 09 Apr 2016 19:27:28 +0200
 
