@@ -1,9 +1,14 @@
-python-kafka (0.9.5-2) UNRELEASED; urgency=medium
+python-kafka (0.9.5-2) unstable; urgency=medium
 
+  [ Ondřej Nový ]
   * Standards-Version is 3.9.8 now (no change)
   * d/rules: Changed UPSTREAM_GIT protocol to https
 
- -- Ondřej Nový <novy@ondrej.org>  Sat, 09 Apr 2016 19:27:28 +0200
+  [ Thomas Goirand ]
+  * Add missing python-sphinx-rtd-theme build-dep (Closes: #830378).
+  * Using pkgos-dh_auto_install.
+
+ -- Thomas Goirand <zigo@debian.org>  Mon, 11 Jul 2016 11:11:11 +0200
 
 python-kafka (0.9.5-1) unstable; urgency=medium
 
