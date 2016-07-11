@@ -1,0 +1,15 @@
+Description: No intersphinx
+Author: Thomas Goirand <zigo@debian.org>
+Forwarded: no
+Last-Update: 2016-07-11
+
+--- python-kafka-0.9.5.orig/docs/conf.py
++++ python-kafka-0.9.5/docs/conf.py
+@@ -30,7 +30,6 @@ import os
+ # ones.
+ extensions = [
+     'sphinx.ext.autodoc',
+-    'sphinx.ext.intersphinx',
+     'sphinx.ext.viewcode',
+ ]
+ 

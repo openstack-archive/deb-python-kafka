@@ -7,6 +7,7 @@ python-kafka (0.9.5-2) unstable; urgency=medium
   [ Thomas Goirand ]
   * Add missing python-sphinx-rtd-theme build-dep (Closes: #830378).
   * Using pkgos-dh_auto_install.
+  * Add no-intersphinx.patch.
 
  -- Thomas Goirand <zigo@debian.org>  Mon, 11 Jul 2016 11:11:11 +0200
 
