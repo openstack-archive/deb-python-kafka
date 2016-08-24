@@ -3,6 +3,7 @@ import six
 
 from kafka.partitioner import Murmur2Partitioner
 from kafka.partitioner.default import DefaultPartitioner
+from kafka.partitioner.hashed import murmur2
 
 
 def test_default_partitioner():
@@ -25,7 +26,7 @@ def test_default_partitioner():
 def test_hash_bytes():
     p = Murmur2Partitioner(range(1000))
     assert p.partition(bytearray(b'test')) == p.partition(b'test')
-    
+
 
 def test_hash_encoding():
     p = Murmur2Partitioner(range(1000))
@@ -41,3 +42,9 @@ def test_murmur2_java_compatibility():
     assert p.partition(b'abc') == 107
     assert p.partition(b'123456789') == 566
     assert p.partition(b'\x00 ') == 742
+
+
+def test_murmur2_not_ascii():
+    # Verify no regression of murmur2() bug encoding py2 bytes that dont ascii encode
+    murmur2(b'\xa4')
+    murmur2(b'\x81' * 1000)
