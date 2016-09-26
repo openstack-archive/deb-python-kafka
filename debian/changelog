@@ -1,3 +1,10 @@
+python-kafka (0.9.5-3) UNRELEASED; urgency=medium
+
+  * d/s/options: extend-diff-ignore of .gitreview
+  * d/control: Using OpenStack's Gerrit as VCS URLs.
+
+ -- Ondřej Nový <onovy@debian.org>  Mon, 26 Sep 2016 19:10:48 +0200
+
 python-kafka (0.9.5-2) unstable; urgency=medium
 
   [ Ondřej Nový ]
