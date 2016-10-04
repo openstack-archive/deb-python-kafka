@@ -1,4 +1,4 @@
-python-kafka (0.9.5-3) UNRELEASED; urgency=medium
+python-kafka (0.9.5-3) unstable; urgency=medium
 
   * d/s/options: extend-diff-ignore of .gitreview
   * d/control: Using OpenStack's Gerrit as VCS URLs.
