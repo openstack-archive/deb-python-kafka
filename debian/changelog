@@ -7,6 +7,9 @@ python-kafka (0.9.5-3) UNRELEASED; urgency=medium
   [ Thomas Goirand ]
   * Do not use rtd theme.
 
+  [ Ondřej Nový ]
+  * Bumped debhelper compat version to 10
+
  -- Thomas Goirand <zigo@debian.org>  Tue, 04 Oct 2016 15:01:29 +0200
 
 python-kafka (0.9.5-2) unstable; urgency=medium
