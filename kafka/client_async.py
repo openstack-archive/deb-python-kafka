@@ -578,24 +578,14 @@ class KafkaClient(object):
                 conn.close(Errors.ConnectionError('Socket EVENT_READ without in-flight-requests'))
                 continue
 
-            # Accumulate as many responses as the connection has pending
-            while conn.in_flight_requests:
-                response = conn.recv()  # Note: conn.recv runs callbacks / errbacks
-
-                # Incomplete responses are buffered internally
-                # while conn.in_flight_requests retains the request
-                if not response:
-                    break
-                responses.append(response)
+            responses.extend(conn.recv()) # Note: conn.recv runs callbacks / errbacks
 
         # Check for additional pending SSL bytes
         if self.config['security_protocol'] in ('SSL', 'SASL_SSL'):
             # TODO: optimize
             for conn in self._conns.values():
                 if conn not in processed and conn.connected() and conn._sock.pending():
-                    response = conn.recv()
-                    if response:
-                        responses.append(response)
+                    responses.extend(conn.recv())
 
         for conn in six.itervalues(self._conns):
             if conn.requests_timed_out():
@@ -607,6 +597,7 @@ class KafkaClient(object):
 
         if self._sensors:
             self._sensors.io_time.record((time.time() - end_select) * 1000000000)
+
         return responses
 
     def in_flight_request_count(self, node_id=None):
